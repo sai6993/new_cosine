@@ -2,7 +2,7 @@ name: Build and Sign Docker Image
 
 on:
   push:
-    branches: [ main ]  # or your desired branch
+    branches: [ main ] # Adjust branch if needed
 
 jobs:
   build-sign:
@@ -29,12 +29,18 @@ jobs:
           push: true
           tags: saivenkatvaraprasady/n8n-node-app:latest
 
+      - name: Get image digest
+        id: digest
+        run: |
+          DIGEST=$(docker buildx imagetools inspect saivenkatvaraprasady/n8n-node-app:latest --format '{{.Digest}}')
+          echo "digest=$DIGEST" >> $GITHUB_OUTPUT
+
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3.2.0
 
-      - name: Sign Docker image
+      - name: Sign Docker image by digest
         run: |
           echo "${{ secrets.COSIGN_PRIVATE_KEY }}" > cosign.key
-          cosign sign --key cosign.key saivenkatvaraprasady/n8n-node-app:latest
+          cosign sign --yes --key cosign.key saivenkatvaraprasady/n8n-node-app@${{ steps.digest.outputs.digest }}
         env:
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
