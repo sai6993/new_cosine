@@ -42,6 +42,6 @@ jobs:
       - name: Sign Docker image
         run: |
           echo "${{ secrets.COSIGN_PRIVATE_KEY }}" > cosign.key
-          cosign sign --key cosign.key "saivenkatvaraprasady/n8n-node-app@${{ steps.digest.outputs.digest }}"
+          cosign sign --key cosign.key --yes "saivenkatvaraprasady/n8n-node-app@${{ steps.digest.outputs.digest }}"
         env:
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
