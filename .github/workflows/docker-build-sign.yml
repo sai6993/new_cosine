@@ -2,48 +2,54 @@ name: Build and Sign Docker Image
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
   build-sign:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to DockerHub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: saivenkatvaraprasady/n8n-node-app:latest
+        uses: actions/checkout@v2
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v3.2.0
+        uses: sigstore/cosign-installer@v3.8.1
+        with:
+          cosign-release: 'v2.4.3'
 
-      - name: Get image digest
-        id: digest
-        run: |
-          docker buildx imagetools inspect saivenkatvaraprasady/n8n-node-app:latest --raw > raw.json
-          echo "digest=$(jq -r '.manifests[0].digest' raw.json)" >> $GITHUB_OUTPUT
+      - name: Verify Cosign Installation
+        run: cosign version
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Docker image
+        run: docker build -t saivenkatvaraprasady/n8n-app2:latest .
+
+      - name: Docker login
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+      - name: Push Docker image
+        run: docker push saivenkatvaraprasady/n8n-app2:latest
+
+      - name: Write signing key to disk
+        run: echo "${{ secrets.COSIGN_PRIVATE_KEY }}" > cosign.key
+        shell: bash
 
       - name: Sign Docker image
-        run: |
-          echo "${{ secrets.COSIGN_PRIVATE_KEY }}" > cosign.key
-          cosign sign --key cosign.key --yes "saivenkatvaraprasady/n8n-node-app@${{ steps.digest.outputs.digest }}"
+        run: cosign sign --key cosign.key --yes saivenkatvaraprasady/n8n-app2:latest
         env:
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
-
-      - name: ✅ Verify Signed Image
-        run: |
-          cosign verify --key <(echo "${{ secrets.COSIGN_PUBLIC_KEY }}") "saivenkatvaraprasady/n8n-node-app@${{ steps.digest.outputs.digest }}" || echo "Verification failed"
+      - name: Verify Signature
+        run: cosign verify --key cosign.pub saivenkatvaraprasady/n8n-app2:latest
