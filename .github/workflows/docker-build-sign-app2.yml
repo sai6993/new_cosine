@@ -1,34 +1,56 @@
-name: Docker Build, Sign and Push App2
-
-on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
-
 jobs:
-  docker:
+  build-image:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # needed for signing the images with GitHub OIDC Token
+    name: build-image
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v2
+      - uses: actions/checkout@v4
         with:
-          node-version: '18'
+          fetch-depth: 1
 
-      - name: Install dependencies
-        run: npm install
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.8.1
 
-      - name: Build Docker image
-        run: docker build -t saivenkatvaraprasady/n8n-app2:latest .
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3.4.0
 
-      - name: Docker login
-        run: echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3.9.0
 
-      - name: Push Docker image
-        run: docker push saivenkatvaraprasady/n8n-app2:latest
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Sign Docker image
-        run: cosign sign --key cosign.key --yes saivenkatvaraprasady/n8n-app2:latest
+      - id: docker_meta
+        uses: docker/metadata-action@v5.6.1
+        with:
+          images: ghcr.io/sigstore/sample-honk
+          tags: type=sha,format=long
+
+      - name: Build and Push container images
+        uses: docker/build-push-action@v6.14.0
+        id: build-and-push
+        with:
+          platforms: linux/amd64,linux/arm/v7,linux/arm64
+          push: true
+          tags: ${{ steps.docker_meta.outputs.tags }}
+
+      # https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-an-intermediate-environment-variable
+      - name: Sign image with a key
+        run: |
+          images=""
+          for tag in ${TAGS}; do
+            images+="${tag}@${DIGEST} "
+          done
+          cosign sign --yes --key cosign.key ${images}
+        env:
+          TAGS: ${{ steps.docker_meta.outputs.tags }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          DIGEST: ${{ steps.build-and-push.outputs.digest }}
