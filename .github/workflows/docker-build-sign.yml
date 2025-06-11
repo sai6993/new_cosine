@@ -2,43 +2,46 @@ name: Build and Sign Docker Image
 
 on:
   push:
-    branches:
-      - main
-  workflow_dispatch:
+    branches: [ main ]
 
 jobs:
-  build-sign-push:
+  build-sign:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Hub
+      - name: Log in to DockerHub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build and push Docker image
-        run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/n8n-app2:latest .
-          docker push ${{ secrets.DOCKER_USERNAME }}/n8n-app2:latest
+        id: build-image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: saivenkatvaraprasady/n8n-node-app:latest
 
-      - name: Restore Cosign keys from GitHub Secrets
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.2.0
+
+      - name: Get image digest
+        id: digest
         run: |
-          echo "${{ secrets.COSIGN_PRIVATE_KEY }}" > cosign.key
-          echo "${{ secrets.COSIGN_PUBLIC_KEY }}" > cosign.pub
+          docker buildx imagetools inspect saivenkatvaraprasady/n8n-node-app:latest --raw > raw.json
+          DIGEST=$(jq -r '.manifests[0].digest' raw.json)
+          echo "digest=$DIGEST" >> $GITHUB_OUTPUT
 
       - name: Sign Docker image
         run: |
-          cosign sign --key cosign.key --yes ${{ secrets.DOCKER_USERNAME }}/n8n-app2:latest
-
-      - name: Verify Docker image
-        run: |
-          ls -l  # Debugging: list files to confirm cosign.pub exists
-          cat cosign.pub | head -n 5  # Debugging: preview public key
-          cosign verify --key cosign.pub ${{ secrets.DOCKER_USERNAME }}/n8n-app2:latest
+          echo "${{ secrets.COSIGN_PRIVATE_KEY }}" > cosign.key
+          cosign sign --key cosign.key --yes saivenkatvaraprasady/n8n-node-app@${{ steps.digest.outputs.digest }}
+        env:
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
